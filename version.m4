@@ -1,5 +1,5 @@
 dnl define the OpenVPN version
-define([PRODUCT_NAME], [FCXTunnel])
+define([PRODUCT_NAME], [OpenVPN])
 define([PRODUCT_TARNAME], [openvpn])
 define([PRODUCT_VERSION_MAJOR], [2])
 define([PRODUCT_VERSION_MINOR], [4])
