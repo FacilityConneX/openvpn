@@ -146,19 +146,6 @@ status_trigger(struct status_output *so)
     }
 }
 
-bool
-status_trigger_tv(struct status_output *so, struct timeval *tv)
-{
-    if (so)
-    {
-        return event_timeout_trigger(&so->et, tv, ETT_DEFAULT);
-    }
-    else
-    {
-        return false;
-    }
-}
-
 void
 status_reset(struct status_output *so)
 {
@@ -216,10 +203,8 @@ status_close(struct status_output *so)
                 ret = false;
             }
         }
-        if (so->filename)
-        {
-            free(so->filename);
-        }
+        free(so->filename);
+
         if (buf_defined(&so->read_buf))
         {
             free_buf(&so->read_buf);

@@ -64,8 +64,7 @@
  *      material.
  *   -# \c S_GOT_KEY, have received remote part of \c key_source2 random
  *      material.
- *   -# \c S_ACTIVE, normal operation during remaining handshake window.
- *   -# \c S_NORMAL_OP, normal operation.
+ *   -# \c S_ACTIVE, normal operation
  *
  * Servers follow the same order, except for \c S_SENT_KEY and \c
  * S_GOT_KEY being reversed, because the server first receives the
@@ -94,9 +93,9 @@
                                  *   immediately after negotiation has
                                  *   completed while still within the
                                  *   handshake window. */
-/* ready to exchange data channel packets */
-#define S_NORMAL_OP       7     /**< Normal operational \c key_state
-                                 *   state. */
+/* Note that earlier versions also had a S_OP_NORMAL state that was
+ * virtually identical with S_ACTIVE and the code still assumes everything
+ * >= S_ACTIVE to be fully operational */
 /** @} name Control channel negotiation states */
 /** @} addtogroup control_processor */
 
@@ -125,6 +124,25 @@ struct key_source {
 struct key_source2 {
     struct key_source client;   /**< Random provided by client. */
     struct key_source server;   /**< Random provided by server. */
+};
+
+
+/**
+ * This reflects the (server side) authentication state after the TLS
+ * session has been established and key_method_2_read is called. If async auth
+ * is enabled the state will first move to KS_AUTH_DEFERRED before eventually
+ * being set to KS_AUTH_TRUE or KS_AUTH_FALSE
+ * Only KS_AUTH_TRUE is fully authenticated
+ */
+enum ks_auth_state {
+  KS_AUTH_FALSE,              /**< Key state is not authenticated  */
+  KS_AUTH_DEFERRED,           /**< Key state authentication is being deferred,
+                                * by async auth */
+  KS_AUTH_TRUE                /**< Key state is authenticated. TLS and user/pass
+                                * succeeded. This includes AUTH_PENDING/OOB
+                                * authentication as those hold the
+                                * connection artificially in KS_AUTH_DEFERRED
+                                */
 };
 
 /**
@@ -185,22 +203,16 @@ struct key_state
     /*
      * If bad username/password, TLS connection will come up but 'authenticated' will be false.
      */
-    bool authenticated;
+    enum ks_auth_state authenticated;
     time_t auth_deferred_expire;
 
-#ifdef ENABLE_DEF_AUTH
-    /* If auth_deferred is true, authentication is being deferred */
-    bool auth_deferred;
-#ifdef MANAGEMENT_DEF_AUTH
+#ifdef ENABLE_MANAGEMENT
     unsigned int mda_key_id;
     unsigned int mda_status;
 #endif
-#ifdef PLUGIN_DEF_AUTH
     unsigned int auth_control_status;
     time_t acf_last_mod;
     char *auth_control_file;
-#endif
-#endif
 };
 
 /** Control channel wrapping (--tls-auth/--tls-crypt) context */
@@ -239,20 +251,15 @@ struct tls_options
     /* if true, don't xmit until first packet from peer is received */
     bool xmit_hold;
 
-#ifdef ENABLE_OCC
     /* local and remote options strings
      * that must match between client and server */
     const char *local_options;
     const char *remote_options;
-#endif
 
     /* from command line */
-    int key_method;
     bool replay;
     bool single_session;
-#ifdef ENABLE_OCC
     bool disable_occ;
-#endif
     int mode;
     bool pull;
     int push_peer_info_detail;
@@ -269,13 +276,17 @@ struct tls_options
     int verify_x509_type;
     const char *verify_x509_name;
     const char *crl_file;
-    const char *crl_file_inline;
+    bool crl_file_inline;
     int ns_cert_type;
     unsigned remote_cert_ku[MAX_PARMS];
     const char *remote_cert_eku;
     uint8_t *verify_hash;
     hash_algo_type verify_hash_algo;
-    char *x509_username_field;
+#ifdef ENABLE_X509ALTUSERNAME
+    char *x509_username_field[MAX_PARMS];
+#else
+    char *x509_username_field[2];
+#endif
 
     /* allow openvpn config info to be
      * passed over control channel */
@@ -289,7 +300,7 @@ struct tls_options
     bool tcp_mode;
 
     const char *config_ciphername;
-    const char *config_authname;
+    const char *config_ncp_ciphers;
     bool ncp_enabled;
 
     bool tls_crypt_v2;
@@ -298,7 +309,6 @@ struct tls_options
     /** TLS handshake wrapping state */
     struct tls_wrap_ctx tls_wrap;
 
-    /* frame parameters for TLS control channel */
     struct frame frame;
 
     /* used for username/password authentication */
@@ -306,15 +316,21 @@ struct tls_options
     bool auth_user_pass_verify_script_via_file;
     const char *tmp_dir;
     const char *auth_user_pass_file;
-    bool auth_token_generate;   /**< Generate auth-tokens on successful user/pass auth,
-                                 *   set via options->auth_token_generate. */
+
+    bool auth_token_generate;   /**< Generate auth-tokens on successful
+                                 * user/pass auth,seet via
+                                 * options->auth_token_generate. */
+    bool auth_token_call_auth; /**< always call normal authentication */
     unsigned int auth_token_lifetime;
+
+    struct key_ctx auth_token_key;
 
     /* use the client-config-dir as a positive authenticator */
     const char *client_config_dir_exclusive;
 
     /* instance-wide environment variable set */
     struct env_set *es;
+    openvpn_net_ctx_t *net_ctx;
     const struct plugin_list *plugins;
 
     /* compression parms */
@@ -335,7 +351,7 @@ struct tls_options
 #define SSLF_TLS_VERSION_MAX_MASK     0xF  /* (uses bit positions 10 to 13) */
     unsigned int ssl_flags;
 
-#ifdef MANAGEMENT_DEF_AUTH
+#ifdef ENABLE_MANAGEMENT
     struct man_def_auth_context *mda_context;
 #endif
 
@@ -367,10 +383,6 @@ struct tls_options
 #define KS_SIZE       2         /**< Size of the \c tls_session.key array. */
 /** @} name Index of key_state objects within a tls_session structure */
 /** @} addtogroup control_processor */
-
-#define AUTH_TOKEN_SIZE 32      /**< Size of server side generated auth tokens.
-                                 *   32 bytes == 256 bits
-                                 */
 
 /**
  * Security parameter state of a single session within a VPN tunnel.
@@ -468,7 +480,6 @@ struct tls_session
  */
 #define KEY_SCAN_SIZE 3
 
-
 /**
  * Security parameter state for a single VPN tunnel.
  * @ingroup control_processor
@@ -489,11 +500,6 @@ struct tls_multi
 
     /* const options and config info */
     struct tls_options opt;
-
-    struct key_state *key_scan[KEY_SCAN_SIZE];
-    /**< List of \c key_state objects in the
-     *   order they should be scanned by data
-     *   channel modules. */
 
     /*
      * used by tls_pre_encrypt to communicate the encrypt key
@@ -523,23 +529,41 @@ struct tls_multi
     char *locked_username;
     struct cert_hash_set *locked_cert_hash_set;
 
-#ifdef ENABLE_DEF_AUTH
+    /* Time of last call to tls_authentication_status */
+    time_t tas_last;
+
     /*
      * An error message to send to client on AUTH_FAILED
      */
     char *client_reason;
 
-    /* Time of last call to tls_authentication_status */
-    time_t tas_last;
-#endif
-
-#if P2MP_SERVER
     /*
      * A multi-line string of general-purpose info received from peer
      * over control channel.
      */
     char *peer_info;
-#endif
+    char *auth_token;    /**< If server sends a generated auth-token,
+                          *   this is the token to use for future
+                          *   user/pass authentications in this session.
+                          */
+    char *auth_token_initial;
+    /**< The first auth-token we sent to a client, for clients that do
+     * not update their auth-token (older OpenVPN3 core versions)
+     */
+#define  AUTH_TOKEN_HMAC_OK              (1<<0)
+    /**< Auth-token sent from client has valid hmac */
+#define  AUTH_TOKEN_EXPIRED              (1<<1)
+    /**< Auth-token sent from client has expired */
+#define  AUTH_TOKEN_VALID_EMPTYUSER      (1<<2)
+    /**<
+     * Auth-token is only valid for an empty username
+     * and not the username actually supplied from the client
+     *
+     * OpenVPN 3 clients sometimes wipes or replaces the username with a
+     * username hint from their config.
+     */
+    int auth_token_state_flags;
+    /**< The state of the auth-token sent from the client last time */
 
     /* For P_DATA_V2 */
     uint32_t peer_id;
@@ -547,13 +571,6 @@ struct tls_multi
 
     char *remote_ciphername;    /**< cipher specified in peer's config file */
 
-    char *auth_token;    /**< If server sends a generated auth-token,
-                          *   this is the token to use for future
-                          *   user/pass authentications in this session.
-                          */
-    time_t auth_token_tstamp; /**< timestamp of the generated token */
-    bool auth_token_sent; /**< If server uses --auth-gen-token and
-                           *   token has been sent to client */
     /*
      * Our session objects.
      */
@@ -562,5 +579,25 @@ struct tls_multi
      *   representing control channel
      *   sessions with the remote peer. */
 };
+
+/**  gets an item  of \c key_state objects in the
+ *   order they should be scanned by data
+ *   channel modules. */
+static inline struct key_state *
+get_key_scan(struct tls_multi *multi, int index)
+{
+    switch (index)
+    {
+        case 0:
+            return &multi->session[TM_ACTIVE].key[KS_PRIMARY];
+        case 1:
+            return &multi->session[TM_ACTIVE].key[KS_LAME_DUCK];
+        case 2:
+            return &multi->session[TM_LAME_DUCK].key[KS_LAME_DUCK];
+        default:
+            ASSERT(false);
+            return NULL; /* NOTREACHED */
+    }
+}
 
 #endif /* SSL_COMMON_H_ */

@@ -46,7 +46,7 @@ array_mult_safe(const size_t m1, const size_t m2, const size_t extra)
     unsigned long long res = (unsigned long long)m1 * (unsigned long long)m2 + (unsigned long long)extra;
     if (unlikely(m1 > limit) || unlikely(m2 > limit) || unlikely(extra > limit) || unlikely(res > (unsigned long long)limit))
     {
-        msg(M_FATAL, "attemped allocation of excessively large array");
+        msg(M_FATAL, "attempted allocation of excessively large array");
     }
     return (size_t) res;
 }
@@ -184,10 +184,7 @@ buf_assign(struct buffer *dest, const struct buffer *src)
 void
 free_buf(struct buffer *buf)
 {
-    if (buf->data)
-    {
-        free(buf->data);
-    }
+    free(buf->data);
     CLEAR(*buf);
 }
 
@@ -474,7 +471,7 @@ x_gc_freespecial(struct gc_arena *a)
 }
 
 void
-gc_addspecial(void *addr, void (free_function)(void *), struct gc_arena *a)
+gc_addspecial(void *addr, void (*free_function)(void *), struct gc_arena *a)
 {
     ASSERT(a);
     struct gc_entry_special *e;

@@ -488,11 +488,8 @@ close_syslog(void)
     {
         closelog();
         use_syslog = false;
-        if (pgmname_syslog)
-        {
-            free(pgmname_syslog);
-            pgmname_syslog = NULL;
-        }
+        free(pgmname_syslog);
+        pgmname_syslog = NULL;
     }
 #endif
 }
@@ -688,7 +685,10 @@ x_check_status(int status,
         }
 #elif defined(_WIN32)
         /* get possible driver error from TAP-Windows driver */
-        extended_msg = tap_win_getinfo(tt, &gc);
+        if (tuntap_defined(tt))
+        {
+            extended_msg = tap_win_getinfo(tt, &gc);
+        }
 #endif
         if (!ignore_sys_error(my_errno))
         {
@@ -740,6 +740,7 @@ openvpn_exit(const int status)
 #ifdef _WIN32
         uninit_win32();
 #endif
+        remove_pid_file();
 
         close_syslog();
 
